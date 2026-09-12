@@ -64,10 +64,39 @@ function subscribe(){if(channel)sb.removeChannel(channel);channel=sb.channel('di
 function nav(v){document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));$(v).classList.add('on');document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));render()}document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>nav(b.dataset.v));
 function openM(x){$(x).classList.add('on')}function closeM(x){$(x).classList.remove('on')}
 function fill(){let s=$('cust');s.innerHTML='<option value="">— Customer —</option>'+d.customers.map(c=>`<option value="${c.id}">${esc(c.name)}${c.company?' — '+esc(c.company):''}</option>`).join('')}$('cust').onchange=()=>{let c=d.customers.find(x=>x.id===$('cust').value);if(c)$('phone').value=c.phone||''}
-async function loadDocs(jobId){$('docs').innerHTML='';if(!jobId)return;let r=await sb.from('job_documents').select('*').eq('job_id',jobId).order('created_at');if(r.error)return;for(let doc of r.data||[]){let u=await sb.storage.from('job-documents').createSignedUrl(doc.storage_path,3600);if(!u.error)$('docs').innerHTML+=`<a target="_blank" href="${u.data.signedUrl}">${esc(doc.document_type)}: ${esc(doc.file_name)}</a><br>`}}
+async function loadDocs(jobId){
+  $('docs').innerHTML='';
+  if(!jobId)return;
+  let r=await sb.from('job_documents').select('*').eq('job_id',jobId).order('created_at');
+  if(r.error){$('docs').textContent='Could not load attachments: '+r.error.message;return}
+  if(!(r.data||[]).length){$('docs').textContent='No attachments yet.';return}
+  for(let doc of r.data||[]){
+    let row=document.createElement('div');
+    row.style.cssText='display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:6px 0;padding:7px 0;border-bottom:1px solid #e5e9ed';
+    let label=document.createElement('span');
+    label.style.flex='1 1 210px';
+    label.textContent=`${doc.document_type}: ${doc.file_name}`;
+    row.appendChild(label);
+    let u=await sb.storage.from('job-documents').createSignedUrl(doc.storage_path,3600);
+    if(!u.error){let a=document.createElement('a');a.className='btn secondary small';a.target='_blank';a.href=u.data.signedUrl;a.textContent='View';row.appendChild(a)}
+    let del=document.createElement('button');
+    del.type='button';del.className='btn danger small';del.textContent='Delete';
+    del.onclick=()=>deleteDocument(doc.id,doc.storage_path,jobId,doc.file_name);
+    row.appendChild(del);
+    $('docs').appendChild(row)
+  }
+}
+async function deleteDocument(docId,storagePath,jobId,fileName){
+  if(!confirm(`Delete attachment "${fileName}"? This permanently removes the file.`))return;
+  let rm=await sb.storage.from('job-documents').remove([storagePath]);
+  if(rm.error)return toast('Could not delete file: '+rm.error.message);
+  let dr=await sb.from('job_documents').delete().eq('id',docId);
+  if(dr.error)return toast('File was removed, but the attachment record could not be deleted: '+dr.error.message);
+  await loadDocs(jobId);
+}
 function job(id='',day=''){fill();document.querySelector('#jm form').reset();$('jid').value='';$('jtitle').textContent='Schedule Job';$('date').value=day||new Date().toISOString().slice(0,10);$('time').value='08:00';$('size').value="20'";$('status').value='Scheduled';$('docs').innerHTML='';if(id){let j=d.jobs.find(x=>x.id===id);$('jtitle').textContent='Edit '+j.number;['date','time','phone','size','release','price','deposit','payment','status','pickup','delivery','miles','fuel','notes'].forEach(k=>$(k).value=j[k]??'');$('cust').value=j.customerId||'';$('jid').value=id;loadDocs(id)}openM('jm')}
 async function uploadDoc(jobId,file,type){if(!file)return;let safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'_'),path=`${jobId}/${crypto.randomUUID()}-${safe}`;let up=await sb.storage.from('job-documents').upload(path,file,{contentType:file.type||undefined});if(up.error)throw up.error;let row=await sb.from('job_documents').insert({job_id:jobId,document_type:type,file_name:file.name,storage_path:path,content_type:file.type,uploaded_by:user.id});if(row.error)throw row.error}
-async function saveJob(e){e.preventDefault();let id=$('jid').value,o=d.jobs.find(j=>j.id===id),num=o?.number||('BB-'+Date.now().toString().slice(-6)),j={number:num,date:$('date').value,time:$('time').value,customerId:$('cust').value,customer:$('cust').selectedOptions[0]?.textContent||'Customer',phone:$('phone').value,size:$('size').value,release:$('release').value,price:+$('price').value||0,deposit:+$('deposit').value||0,payment:$('payment').value,status:$('status').value,pickup:$('pickup').value,delivery:$('delivery').value,miles:+$('miles').value||0,fuel:+$('fuel').value||0,notes:$('notes').value};let r=id?await sb.from('jobs').update(toJob(j)).eq('id',id).select().single():await sb.from('jobs').insert(toJob(j)).select().single();if(r.error)return toast(r.error.message);let jobId=r.data.id;try{await uploadDoc(jobId,$('bol').files[0],'Bill of Lading');await uploadDoc(jobId,$('invoice').files[0],'Invoice')}catch(err){toast('Job saved, but document upload failed: '+err.message)}closeM('jm');await loadAll()}
+async function saveJob(e){e.preventDefault();let submit=e.submitter||e.target.querySelector('button[type=submit],button:not([type])');if(submit){submit.disabled=true;submit.textContent='Saving…'};try{let id=$('jid').value,o=d.jobs.find(j=>j.id===id),num=o?.number||('BB-'+Date.now().toString().slice(-6)),j={number:num,date:$('date').value,time:$('time').value,customerId:$('cust').value,customer:$('cust').selectedOptions[0]?.textContent||'Customer',phone:$('phone').value,size:$('size').value,release:$('release').value,price:+$('price').value||0,deposit:+$('deposit').value||0,payment:$('payment').value,status:$('status').value,pickup:$('pickup').value,delivery:$('delivery').value,miles:+$('miles').value||0,fuel:+$('fuel').value||0,notes:$('notes').value};let r=id?await sb.from('jobs').update(toJob(j)).eq('id',id).select().single():await sb.from('jobs').insert(toJob(j)).select().single();if(r.error){toast(r.error.message);return}let jobId=r.data.id;try{await uploadDoc(jobId,$('bol').files[0],'Bill of Lading');await uploadDoc(jobId,$('invoice').files[0],'Invoice')}catch(err){toast('Job saved, but document upload failed: '+err.message)}closeM('jm');await loadAll()}finally{if(submit){submit.disabled=false;submit.textContent='Save Job'}}}
 async function delJob(id){if(!confirm('Delete this job?'))return;let r=await sb.from('jobs').delete().eq('id',id);if(r.error)return toast(r.error.message);await loadAll()}
 function maps(q){return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q)}
 function actions(j){return `<div class="actions"><button class="btn small" onclick="job('${j.id}')">Edit</button><a class="btn secondary small" target="_blank" href="${maps(j.pickup)}">Pickup</a><a class="btn secondary small" target="_blank" href="${maps(j.delivery)}">Delivery</a>${j.phone?`<a class="btn secondary small" href="tel:${esc(j.phone)}">Call</a>`:''}<button class="btn danger small" onclick="delJob('${j.id}')">Delete</button></div>`}
