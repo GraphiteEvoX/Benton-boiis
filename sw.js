@@ -1,6 +1,8 @@
-const CACHE_NAME = 'benton-boys-dispatch-v6';
+const CACHE_NAME = 'benton-boys-dispatch-v7';
 
-self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('install', () => {
+  self.skipWaiting();
+});
 
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
@@ -13,6 +15,10 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const req = event.request;
 
+  // Never intercept POST, PUT, PATCH, DELETE, auth, uploads, or other non-GET requests.
+  if (req.method !== 'GET') return;
+
+  // Network-first for page navigation so app updates appear quickly.
   if (req.mode === 'navigate' || req.url.endsWith('/index.html') || req.url.endsWith('/')) {
     event.respondWith((async () => {
       try {
@@ -29,11 +35,14 @@ self.addEventListener('fetch', event => {
     return;
   }
 
+  // Network-first for other GET assets, with offline fallback.
   event.respondWith((async () => {
     try {
       const fresh = await fetch(req);
-      const cache = await caches.open(CACHE_NAME);
-      await cache.put(req, fresh.clone());
+      if (fresh && fresh.ok && req.url.startsWith(self.location.origin)) {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(req, fresh.clone());
+      }
       return fresh;
     } catch (err) {
       const cached = await caches.match(req);
