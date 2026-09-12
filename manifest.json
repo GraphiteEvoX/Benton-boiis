@@ -1,0 +1,9 @@
+{
+  "name": "Benton Boys Dispatch Manager",
+  "short_name": "Benton Boys",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f3f5f7",
+  "theme_color": "#17324d",
+  "description": "Mobile scheduling system for Benton Boys shipping container hauling."
+}
