@@ -38,10 +38,24 @@ table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1p
  .easy-grid .brand-tile small{font-size:11px}
  .easy-grid .receipts-tile{grid-column:1/-1;min-height:88px}
  @media(max-width:360px){.easy-grid .brand-tile{min-height:98px;font-size:14px}.home-nav-btn{min-width:88px}}
-</style></head>
+</style>
+<style>
+/* Benton Boiis final header polish — visual/navigation only. */
+.brand-app-title{display:inline-flex;align-items:stretch;max-width:calc(100% - 105px);min-height:58px;margin:0 0 3px;border:2px solid #2ca9e8;border-radius:9px;background:linear-gradient(180deg,#138d48,#08743b);box-shadow:inset 0 0 0 2px #ffffff18,0 4px 12px #0003;overflow:hidden;position:relative}
+.brand-app-title:before,.brand-app-title:after{content:'';position:absolute;top:0;bottom:0;width:2px;background:#ffffff22}.brand-app-title:before{left:18%}.brand-app-title:after{right:18%}
+.brand-app-title .container-ribs{position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0,transparent 22px,#ffffff0b 23px,#0000000d 25px,transparent 27px);pointer-events:none}
+.brand-app-title .title-copy{position:relative;z-index:1;display:flex;align-items:center;padding:7px 13px;color:#fff;font-size:clamp(15px,4vw,21px);font-weight:1000;line-height:1.08;letter-spacing:.15px;text-shadow:0 2px 2px #0006}
+.brand-app-title .title-copy small{display:block;font-size:9px;letter-spacing:1.6px;color:#d9f4e4;margin-top:3px}
+.mini-container-home{position:relative;min-width:108px;height:49px;padding:0 12px;border:2px solid #2ca9e8;border-radius:8px;background:linear-gradient(180deg,#1ba052,#08753d);color:#fff;font-size:16px;font-weight:1000;text-shadow:0 1px 2px #0006;box-shadow:inset 0 0 0 2px #ffffff17;overflow:hidden}
+.mini-container-home:before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0,transparent 15px,#ffffff12 16px,#00000012 18px,transparent 20px)}
+.mini-container-home span{position:relative;z-index:1}.mini-container-home .home-glyph{font-size:19px;margin-right:5px}
+.dashboard-tools{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.more-wrap{position:relative}.more-btn{min-width:94px}.more-menu{display:none;position:absolute;z-index:30;left:0;top:calc(100% + 7px);width:205px;padding:8px;background:#fff;border:1px solid var(--line);border-radius:11px;box-shadow:0 12px 30px #0b1f3350}.more-menu.on{display:block}.more-menu button,.more-menu label{display:block;width:100%;margin:0 0 6px;text-align:left}.more-menu label:last-child,.more-menu button:last-child{margin-bottom:0}
+@media(max-width:430px){.brand-app-title{max-width:calc(100% - 92px);min-height:54px}.brand-app-title .title-copy{font-size:15px;padding:6px 9px}.brand-app-title .title-copy small{font-size:8px}.mini-container-home{min-width:102px;height:47px}.more-menu{width:190px}}
+</style>
+</head>
 <body>
-<header><h1>Benton Boiis • Dispatch Manager</h1><div class="sub">THECONTAINERGUY • Built for the road ahead <span id="cloudStatus">• Connecting…</span></div><div style="float:right;margin-top:-33px"><button id="signoutBtn" class="btn secondary small" style="display:none" onclick="signOut()">Sign Out</button></div>
-<div class="simple-nav"><button type="button" id="homeNavBtn" class="home-nav-btn" onclick="nav('home')" aria-label="Return to dashboard">⌂ <span>Home</span></button><strong id="currentSection" class="current-section" aria-live="polite">Dashboard</strong></div></header>
+<header><div class="brand-app-title" aria-label="Benton Boiis Dispatch Manager"><span class="container-ribs"></span><div class="title-copy"><div>Benton Boiis<br>Dispatch Manager<small>THECONTAINERGUY</small></div></div></div><div class="sub">Built for the road ahead <span id="cloudStatus">• Connecting…</span></div><div style="float:right;margin-top:-33px"><button id="signoutBtn" class="btn secondary small" style="display:none" onclick="signOut()">Sign Out</button></div>
+<div class="simple-nav"><button type="button" id="homeNavBtn" class="mini-container-home" onclick="nav('home')" aria-label="Return to dashboard"><span><span class="home-glyph">⌂</span>Home</span></button><strong id="currentSection" class="current-section" aria-live="polite">Dashboard</strong></div></header>
 <main>
 <section id="home" class="view on"><div class="brand-hero"><img src="benton-boiis-logo.jpg" alt="Benton Boiis TheContainerGuy logo"><div class="brand-copy"><span class="brand-status">● CLOUD CONNECTED</span><h2>Benton Boiis</h2><p>WE DELIVER. WE LOAD. WE MOVE.</p></div></div><div class="brand-grid easy-grid">
 <button type="button" class="brand-tile" onclick="nav('jobs')"><span class="ico">🚛</span>Jobs / Loads<small>Schedule &amp; Manage</small></button>
@@ -49,7 +63,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1p
 <button type="button" class="brand-tile" onclick="nav('customers')"><span class="ico">👥</span>Customers<small>Customer Database</small></button>
 <button type="button" class="brand-tile" onclick="nav('timeclock')"><span class="ico">⏱</span>Time Clock<small>Clock In / Out</small></button>
 <button type="button" class="brand-tile receipts-tile" onclick="nav('receipts')"><span class="ico">🧾</span>Receipts<small>Expenses &amp; Photos</small></button>
-</div><div class="toolbar"><button class="btn" onclick="job()">＋ Schedule Job</button><button class="btn secondary" onclick="backup()">Backup</button><label class="btn secondary">Restore<input id="restore" type="file" accept=".json" style="display:none" onchange="restore(event)"></label></div>
+</div><div class="dashboard-tools"><button class="btn" onclick="job()">＋ Schedule Job</button><div class="more-wrap"><button type="button" class="btn secondary more-btn" onclick="toggleMore(event)">••• More</button><div id="moreMenu" class="more-menu"><button type="button" class="btn secondary small" onclick="backup();closeMore()">⬇ Backup Data</button><label class="btn secondary small">⬆ Restore Data<input id="restore" type="file" accept=".json" style="display:none" onchange="restore(event);closeMore()"></label></div></div></div>
 <div class="stats"><div class="stat"><b id="today">0</b><span>Today's Jobs</span></div><div class="stat"><b id="upcoming">0</b><span>Upcoming Jobs</span></div><div class="stat"><b id="revenue">$0</b><span>Upcoming Revenue</span></div><div class="stat"><b id="balance">$0</b><span>Open Balance</span></div></div>
 <div class="card" style="margin-top:12px"><h2>Next Jobs</h2><div id="next"></div></div></section>
 <section id="calendar" class="view"><div class="card"><div class="toolbar"><button class="btn secondary small" onclick="month(-1)">‹</button><b id="mtitle" style="padding:9px"></b><button class="btn secondary small" onclick="month(1)">›</button><button class="btn small" onclick="job('',new Date().toISOString().slice(0,10))">＋ Job</button></div><div class="calendar"><div class="dow">SUN</div><div class="dow">MON</div><div class="dow">TUE</div><div class="dow">WED</div><div class="dow">THU</div><div class="dow">FRI</div><div class="dow">SAT</div></div><div id="cal" class="calendar"></div><div id="calDayPanel" class="card calendar-day-panel" style="display:none"></div></div></section>
@@ -89,7 +103,11 @@ async function loadAll(retry=0){let [jr,cr,pr]=await Promise.all([sb.from('jobs'
 function fromJob(j){return{id:j.id,number:j.job_number||'',date:j.job_date,time:(j.job_time||'').slice(0,5),customerId:j.customer_id||'',customer:j.customer_name||'Customer',phone:j.customer_phone||'',size:j.container_size||"20'",release:j.release_number||j.container_id||'',price:+j.price||0,deposit:+j.deposit||0,payment:j.payment_method||'',status:j.status||'Scheduled',pickup:j.pickup||'',delivery:j.delivery||'',miles:+j.mileage||0,fuel:+j.fuel_cost||0,notes:j.notes||''}}
 function toJob(j){return{job_number:j.number,job_date:j.date,job_time:j.time||null,customer_id:j.customerId||null,customer_name:j.customer,customer_phone:j.phone,container_size:j.size,release_number:j.release||null,container_id:j.release||null,price:j.price,deposit:j.deposit,payment_method:j.payment||null,status:j.status,pickup:j.pickup,delivery:j.delivery,mileage:j.miles,fuel_cost:j.fuel,trip_cost:j.fuel,notes:j.notes,created_by:user.id}}
 function subscribe(){if(channel)sb.removeChannel(channel);channel=sb.channel('dispatch-live').on('postgres_changes',{event:'*',schema:'public',table:'jobs'},()=>loadAll()).on('postgres_changes',{event:'*',schema:'public',table:'customers'},()=>loadAll()).subscribe()}
+function closeMore(){let m=$('moreMenu');if(m)m.classList.remove('on')}
+function toggleMore(e){e?.stopPropagation();let m=$('moreMenu');if(m)m.classList.toggle('on')}
+document.addEventListener('click',e=>{let m=$('moreMenu');if(m&&m.classList.contains('on')&&!e.target.closest('.more-wrap'))closeMore()});
 function nav(v){
+ closeMore();
  const names={home:'Dashboard',jobs:'Jobs / Loads',calendar:'Calendar',customers:'Customers',timeclock:'Time Clock',receipts:'Receipts'};
  if(!Object.prototype.hasOwnProperty.call(names,v)||!$(v))return;
  if(v==='receipts')loadReceipts();
