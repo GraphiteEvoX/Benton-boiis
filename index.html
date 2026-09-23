@@ -93,10 +93,45 @@ header .sub{font-size:11px;line-height:1.25;color:#fff;padding-right:92px;margin
  .mini-container-home{width:138px;min-width:138px;height:50px}.current-section{font-size:16px}.more-menu{width:198px}
 }
 </style>
+
+<style>
+/* Final header match: industrial Benton Boiis blue container + always-visible HOME. */
+.brand-app-title{
+  height:126px;
+  border:3px solid #168fd2;
+  border-radius:4px;
+  background:
+    linear-gradient(180deg,#0a75bd 0 7%,transparent 7% 91%,#07558f 91%),
+    repeating-linear-gradient(90deg,#07558f 0 12px,#064777 12px 18px,#0870b3 18px 25px);
+  box-shadow:inset 0 0 0 2px #00243d,0 3px 8px #0006;
+}
+.brand-app-title:before,.brand-app-title:after{
+  top:3px;bottom:3px;width:13px;border-color:#2e9bd1;border-radius:1px;
+  background:linear-gradient(90deg,#043252,#0a69a7,#042d4a);
+}
+.brand-app-title .title-copy{
+  transform:scaleY(1.08);
+  text-shadow:0 4px 0 #06121c,2px 0 0 #06121c,-2px 0 0 #06121c,0 -2px 0 #06121c,0 7px 9px #000b;
+}
+.brand-app-title .title-copy>div{
+  font-size:clamp(32px,9vw,48px);
+  letter-spacing:0;
+}
+.brand-app-title .title-copy small{
+  margin-top:7px;font-size:clamp(10px,2.8vw,13px);letter-spacing:2.7px;
+}
+.simple-nav{min-height:62px}
+.current-section{display:none!important}
+#homeNavBtn{display:block!important}
+@media(max-width:430px){
+ .brand-app-title{height:116px}
+ .brand-app-title .title-copy>div{font-size:clamp(30px,8.8vw,40px)}
+}
+</style>
 </head>
 <body>
 <header><div class="brand-app-title" aria-label="Benton Boiis Dispatch Manager"><span class="container-ribs"></span><div class="title-copy"><div>Benton Boiis<br>Dispatch Manager<small>THECONTAINERGUY</small></div></div></div><div class="sub">Built for the road ahead <span id="cloudStatus">• Connecting…</span></div><div style="float:right;margin-top:-33px"><button id="signoutBtn" class="btn secondary small" style="display:none" onclick="signOut()">Sign Out</button></div>
-<div class="simple-nav"><button type="button" id="homeNavBtn" class="mini-container-home" hidden onclick="nav('home')" aria-label="Return to dashboard"><span><span class="home-glyph">⌂</span>Home</span></button><strong id="currentSection" class="current-section" aria-live="polite">Dashboard</strong></div></header>
+<div class="simple-nav"><button type="button" id="homeNavBtn" class="mini-container-home" onclick="nav('home')" aria-label="Return to dashboard"><span><span class="home-glyph">⌂</span>Home</span></button><strong id="currentSection" class="current-section" aria-live="polite">Dashboard</strong></div></header>
 <main>
 <section id="home" class="view on"><div class="brand-hero"><img src="benton-boiis-logo.jpg" alt="Benton Boiis TheContainerGuy logo"><div class="brand-copy"><span class="brand-status">● CLOUD CONNECTED</span><h2>Benton Boiis</h2><p>WE DELIVER. WE LOAD. WE MOVE.</p></div></div><div class="brand-grid easy-grid">
 <button type="button" class="brand-tile" onclick="nav('jobs')"><span class="ico">🚛</span>Jobs / Loads<small>Schedule &amp; Manage</small></button>
@@ -147,7 +182,7 @@ function subscribe(){if(channel)sb.removeChannel(channel);channel=sb.channel('di
 function closeMore(){let m=$('moreMenu');if(m)m.classList.remove('on')}
 function toggleMore(e){e?.stopPropagation();let m=$('moreMenu');if(m)m.classList.toggle('on')}
 document.addEventListener('click',e=>{let m=$('moreMenu');if(m&&m.classList.contains('on')&&!e.target.closest('.more-wrap'))closeMore()});
-function nav(v){const hb=document.getElementById('homeNavBtn');if(hb)hb.hidden=(v==='home');
+function nav(v){
  closeMore();
  const names={home:'Dashboard',jobs:'Jobs / Loads',calendar:'Calendar',customers:'Customers',timeclock:'Time Clock',receipts:'Receipts'};
  if(!Object.prototype.hasOwnProperty.call(names,v)||!$(v))return;
