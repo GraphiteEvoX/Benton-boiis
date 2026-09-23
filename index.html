@@ -195,7 +195,7 @@ function receiptGuess(raw){
  // OCR can read a logo as nonsense. Recognize only identifiable merchant text.
  const merchantPatterns=[[/o\s*['’]?\s*reill?y(?:\s*auto\s*parts)?/i,"O’Reilly Auto Parts"],[/\bshell\b/i,'Shell'],[/\b(?:auto\s*zone|autozone)\b/i,'AutoZone'],[/\bnapa\b/i,'NAPA Auto Parts'],[/\b(?:costco|walmart|home\s*depot|lowe'?s|chevron|76|arco|exxon|mobil|pilot|love'?s)\b/i,null]];
  let merchant=null;for(const [re,name] of merchantPatterns){let match=text.match(re);if(match){merchant=name||match[0].trim();break}}
- if(!merchant){let candidate=lines.slice(0,7).find(l=>/^[A-Za-z][A-Za-z &'’.-]{3,45}$/.test(l)&&!/(welcome|receipt|invoice|thank|store hours|center street|street|phone|date|approved)/i.test(l));if(candidate&&candidate.split(/\s+/).length>=2)merchant=candidate}
+ // Unknown or mangled logos are left blank rather than saved as invented merchant names.
  if(merchant)$set('Vendor',merchant);else warnings.push('Vendor needs review');
  // Only read an actual printed date. Keep the existing date as a manual fallback, but flag it.
  let dates=[...text.matchAll(/\b(0?[1-9]|1[0-2])[\/.-]([0-2]?\d|3[01])[\/.-](20\d{2}|\d{2})\b/g)];
@@ -233,21 +233,56 @@ function receiptGuess(raw){
  return warnings;
 }
 async function receiptOcrImage(file){
- // Scale the receipt itself rather than the surrounding bed/table; enhance contrast locally.
- let bmp=await createImageBitmap(file),w=bmp.width,h=bmp.height;
- let c=document.createElement('canvas');let scale=Math.min(2.5,2600/Math.max(w,h));c.width=Math.max(1,Math.round(w*scale));c.height=Math.max(1,Math.round(h*scale));let ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(bmp,0,0,c.width,c.height);bmp.close?.();
- let data=ctx.getImageData(0,0,c.width,c.height),px=data.data;
- for(let i=0;i<px.length;i+=4){let g=.299*px[i]+.587*px[i+1]+.114*px[i+2];let v=Math.max(0,Math.min(255,(g-128)*1.5+160));px[i]=px[i+1]=px[i+2]=v}ctx.putImageData(data,0,0);
- return c;
+ // Analyze a downscaled photograph to locate the bright paper, excluding the table/bed.
+ const bmp=await createImageBitmap(file),w=bmp.width,h=bmp.height;
+ const probe=document.createElement('canvas');probe.width=320;probe.height=Math.max(1,Math.round(320*h/w));
+ const pc=probe.getContext('2d',{willReadFrequently:true});pc.drawImage(bmp,0,0,probe.width,probe.height);
+ const im=pc.getImageData(0,0,probe.width,probe.height),pw=probe.width,ph=probe.height;
+ const bright=(x,y)=>{let k=(y*pw+x)*4,p=im.data;return .299*p[k]+.587*p[k+1]+.114*p[k+2]};
+ // Scan several horizontal slices; the receipt is generally brighter than its surroundings.
+ let spans=[];
+ for(let fy of [.22,.35,.5,.65,.78]){
+  let y=Math.min(ph-1,Math.floor(ph*fy)),lum=[];
+  for(let x=0;x<pw;x++){let v=0;for(let dy=-2;dy<=2;dy++)v+=bright(x,Math.max(0,Math.min(ph-1,y+dy)));lum.push(v/5)}
+  let runs=[],begin=-1;for(let x=0;x<=pw;x++){
+   let on=x<pw&&lum[x]>165;
+   if(on&&begin<0)begin=x;
+   if(!on&&begin>=0){if(x-begin>=pw*.13)runs.push([begin,x]);begin=-1}
+  }
+  let center=runs.filter(r=>r[0]<pw*.57&&r[1]>pw*.43).sort((a,b)=>(b[1]-b[0])-(a[1]-a[0]))[0];
+  if(center&&center[1]-center[0]<pw*.8)spans.push(center);
+ }
+ let crop=null;
+ if(spans.length>=3){let left=Math.min(...spans.map(r=>r[0])),right=Math.max(...spans.map(r=>r[1]));
+  let pad=pw*.045;left=Math.max(0,left-pad);right=Math.min(pw,right+pad);
+  if(right-left>=pw*.15&&right-left<=pw*.83)crop={x:Math.floor(left/pw*w),width:Math.ceil((right-left)/pw*w)};
+ }
+ function prepare(rect){
+  let sx=rect?.x||0,sw=rect?.width||w;
+  // Keep the full vertical extent: dates and totals may be at opposite ends of a long receipt.
+  let targetWidth=rect?1500:Math.min(1500,w),scale=Math.min(3,targetWidth/sw,3400/h);
+  let c=document.createElement('canvas');c.width=Math.max(1,Math.round(sw*scale));c.height=Math.max(1,Math.round(h*scale));
+  let ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(bmp,sx,0,sw,h,0,0,c.width,c.height);
+  let data=ctx.getImageData(0,0,c.width,c.height),px=data.data;
+  for(let i=0;i<px.length;i+=4){let g=.299*px[i]+.587*px[i+1]+.114*px[i+2];let v=Math.max(0,Math.min(255,(g-128)*1.6+156));px[i]=px[i+1]=px[i+2]=v}ctx.putImageData(data,0,0);
+  return c;
+ }
+ let images={cropped:crop?prepare(crop):null,full:prepare(null)};bmp.close?.();return images;
 }
 async function autoReadReceipt(){
  if(!receiptFile||!receiptFile.type.startsWith('image/')||receiptBusy)return;
- receiptBusy=true;$('receiptReadBtn').disabled=true;$('receiptReadStatus').textContent='Reading receipt…';
+ receiptBusy=true;$('receiptReadBtn').disabled=true;$('receiptReadStatus').textContent='Locating receipt and reading text…';
  try{
   if(!window.Tesseract)await new Promise((resolve,reject)=>{let s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';s.onload=resolve;s.onerror=()=>reject(new Error('Receipt reader unavailable'));document.head.appendChild(s)});
-  // Clear previous OCR guesses; a second scan must not retain a false value from the first.
   for(let k of ['Vendor','Description','Quantity','Subtotal','Tax','Total'])$('receipt'+k).value='';$('receiptCategory').value='Other';
-  let canvas=await receiptOcrImage(receiptFile);let result=await Tesseract.recognize(canvas,'eng');let warnings=receiptGuess(result.data.text||'');
+  let images=await receiptOcrImage(receiptFile);
+  let worker=await Tesseract.createWorker('eng');let results=[];
+  try{
+   if(images.cropped){$('receiptReadStatus').textContent='Reading enlarged receipt…';let r=await worker.recognize(images.cropped);results.push(r.data.text||'')}
+   $('receiptReadStatus').textContent='Checking printed dates and amounts…';let r=await worker.recognize(images.full);results.push(r.data.text||'');
+  }finally{await worker.terminate()}
+  // Merge independent reads; the parser accepts amounts only when labeled and reconciled.
+  let warnings=receiptGuess(results.join('\n'));
   $('receiptReadStatus').textContent=warnings.length?'Review required: '+warnings.join('; ')+'. Check every field against the photo before saving.':'Fields extracted. Verify all values against the receipt before saving.';
  }catch(e){$('receiptReadStatus').textContent='Auto-read unavailable. Enter receipt details manually. '+(e.message||'')}
  finally{receiptBusy=false;$('receiptReadBtn').disabled=false}
