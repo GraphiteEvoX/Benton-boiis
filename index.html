@@ -508,10 +508,18 @@ function receiptGuess(raw){
    }
  }else if(/\b(?:o\s*['’]?\s*reill?y|auto\s*parts|napa|autozone|core\s*return|warranty|motor\s*oil|filter|belt|hose|sensor|bulb|fuse|bearing|brake|battery)\b/i.test(text)){
    $set('Category','Parts');
-   let ignore=/\b(?:thank|subtotal|sales tax|total|savings|counter|date|invoice|store hours|phone|address|warranty|core return|qty|quantity|auth|visa|mastercard|change)\b/i;
+   let ignore=/\b(?:thank|subtotal|sales tax|total|savings|counter|date|invoice|store hours|phone|address|warranty|core return|qty|quantity|auth|visa|mastercard|change|special offer|regular price|you saved|manufacturer)\b/i;
+   let itemWords=/\b(?:filter|belt|hose|sensor|bulb|socket|fuse|bearing|brake|battery|pin|rust|penetr(?:ant)?|oil|part|wiper|blade|plug|wire|lamp|grease|fluid|cleaner|tool|adapter|connector|clamp|seal|gasket|valve|pump|starter|alternator)\b/i;
+   const cleanItem=l=>l.replace(/^\s*[A-Z0-9-]{2,18}\s+(?=[A-Za-z])/,'').replace(/\s+[-+]?\$?\d+(?:\.\d{2})?\s*[A-Z]?\s*$/,'').replace(/\s{2,}/g,' ').trim();
    let candidates=lines.filter(l=>!ignore.test(l)&&/[A-Za-z]{3}/.test(l)&&l.length>=4&&l.length<=60);
-   let item=candidates.find(l=>/\b(?:filter|belt|hose|sensor|bulb|fuse|bearing|brake|battery|pin|rust|penetr|oil|part)\b/i.test(l));
-   $set('Description',item?item.replace(/\s+\$?\d+(?:\.\d{2})?.*$/,'').trim():'Auto parts / supplies');
+   let items=[];
+   for(let l of candidates){
+     let item=cleanItem(l);
+     if(itemWords.test(item)&&!items.some(x=>x.toLowerCase()===item.toLowerCase()))items.push(item);
+   }
+   // Receipts often print a stock/SKU line followed by the human-readable item name. Keep all useful item names, not just the first one.
+   items=items.filter(x=>!/^o\s*['’]?\s*reill?y/i.test(x)&&!/(?:auto\s*parts|professional parts people)/i.test(x)).slice(0,6);
+   $set('Description',items.length?items.join(' + '):'Auto parts / supplies');
  }else warnings.push('Category and description need review');
 
  // Mixed purchase + return/credit transactions (battery core returns, merchandise returns, store credits).
@@ -536,7 +544,9 @@ function receiptGuess(raw){
    if(rs!==null&&rt!==null&&rr!==null){
      let combos=[[rs,rt,rr],[-Math.abs(rs),-Math.abs(rt),-Math.abs(rr)],
                  [-Math.abs(rs),-Math.abs(rt),Math.abs(rr)],[Math.abs(rs),Math.abs(rt),-Math.abs(rr)]];
-     let good=combos.find(x=>centsClose(x[0]+x[1],x[2],3));
+     let valid=combos.filter(x=>centsClose(x[0]+x[1],x[2],3));
+     // A return/credit that makes both subtotal and tax negative is a refund, so preserve the negative final total too.
+     let good=valid.find(x=>x[0]<0&&x[1]<=0&&x[2]<0)||valid[0];
      if(good){$set('Subtotal',good[0].toFixed(2));$set('Tax',good[1].toFixed(2));$set('Total',good[2].toFixed(2))}
    }
    let credits=[];
@@ -548,7 +558,7 @@ function receiptGuess(raw){
    if(credits.length){
      let c=credits.reduce((a,b)=>a+b,0);
      let base=$('receiptDescription').value||'Parts / supplies';
-     $set('Description',base+' • Return/credit '+c.toFixed(2));
+     $set('Description',base+' • Return/credit '+(c<0?'-$':'$')+Math.abs(c).toFixed(2));
    }else if($('receiptDescription').value){
      $set('Description',$('receiptDescription').value+' • Includes return/credit');
    }
@@ -627,7 +637,7 @@ async function autoReadReceipt(){
  finally{receiptBusy=false;$('receiptReadBtn').disabled=false}
 }
 function editReceipt(id){let r=companyReceipts.find(x=>x.id===id);if(!r)return;newReceipt();$('receiptModalTitle').textContent='Edit Receipt';$('receiptId').value=id;$('receiptDate').value=r.expense_date;$('receiptVendor').value=r.vendor||'';$('receiptDescription').value=r.description||'';$('receiptCategory').value=r.category;$('receiptQuantity').value=r.quantity??'';$('receiptSubtotal').value=r.subtotal??'';$('receiptTax').value=r.tax??'';$('receiptTotal').value=r.total;$('receiptJob').value=r.job_id||'';$('receiptFileStatus').textContent='Existing photo is saved. Choose a new one only to replace it.';$('receiptSaveBtn').textContent='Update Receipt'}
-async function saveReceipt(e){e.preventDefault();if(receiptBusy)return toast('Wait for the photo reader to finish.');let id=$('receiptId').value,existing=companyReceipts.find(r=>r.id===id);if(!receiptFile&&!existing)return toast('Please add a receipt photo or PDF first.');let total=Number($('receiptTotal').value);if(!Number.isFinite(total)||total<0)return toast('Enter a valid total.');let optional=k=>$('receipt'+k).value===''?null:Number($('receipt'+k).value);let row={expense_date:$('receiptDate').value,vendor:$('receiptVendor').value.trim(),description:$('receiptDescription').value.trim(),category:$('receiptCategory').value,quantity:optional('Quantity'),subtotal:optional('Subtotal'),tax:optional('Tax'),total,job_id:$('receiptJob').value||null};if(!row.expense_date)return toast('Choose a date.');if(row.subtotal!==null&&row.tax!==null&&Math.abs(Math.round(row.subtotal*100)+Math.round(row.tax*100)-Math.round(row.total*100))>1)return toast('Subtotal + tax does not match total. Check the receipt amounts.');let btn=$('receiptSaveBtn');btn.disabled=true;btn.textContent='Saving…';let newPath=null;try{if(receiptFile){let ext=receiptFile.type==='application/pdf'?'pdf':receiptFile.type==='image/png'?'png':receiptFile.type==='image/webp'?'webp':'jpg';newPath=user.id+'/'+crypto.randomUUID()+'.'+ext;let up=await sb.storage.from('company-receipts').upload(newPath,receiptFile,{contentType:receiptFile.type,upsert:false});if(up.error)throw up.error;row.storage_path=newPath}if(id){let r=await sb.from('company_receipts').update(row).eq('id',id).select('id').single();if(r.error)throw r.error}else{row.uploaded_by=user.id;let r=await sb.from('company_receipts').insert(row).select('id').single();if(r.error)throw r.error}closeM('receiptModal');resetReceiptFile();await loadReceipts();if(id&&newPath&&existing?.storage_path)await sb.storage.from('company-receipts').remove([existing.storage_path]);toast('Receipt saved to the cloud.')}catch(err){if(newPath)await sb.storage.from('company-receipts').remove([newPath]);toast('Could not save receipt: '+(err.message||err))}finally{btn.disabled=false;btn.textContent=id?'Update Receipt':'Save Receipt'}}
+async function saveReceipt(e){e.preventDefault();if(receiptBusy)return toast('Wait for the photo reader to finish.');let id=$('receiptId').value,existing=companyReceipts.find(r=>r.id===id);if(!receiptFile&&!existing)return toast('Please add a receipt photo or PDF first.');let total=Number($('receiptTotal').value);if(!Number.isFinite(total))return toast('Enter a valid total. Refunds/credits may be negative.');let optional=k=>$('receipt'+k).value===''?null:Number($('receipt'+k).value);let row={expense_date:$('receiptDate').value,vendor:$('receiptVendor').value.trim(),description:$('receiptDescription').value.trim(),category:$('receiptCategory').value,quantity:optional('Quantity'),subtotal:optional('Subtotal'),tax:optional('Tax'),total,job_id:$('receiptJob').value||null};if(!row.expense_date)return toast('Choose a date.');if(row.subtotal!==null&&row.tax!==null&&Math.abs(Math.round(row.subtotal*100)+Math.round(row.tax*100)-Math.round(row.total*100))>1)return toast('Subtotal + tax does not match total. Check the receipt amounts.');let btn=$('receiptSaveBtn');btn.disabled=true;btn.textContent='Saving…';let newPath=null;try{if(receiptFile){let ext=receiptFile.type==='application/pdf'?'pdf':receiptFile.type==='image/png'?'png':receiptFile.type==='image/webp'?'webp':'jpg';newPath=user.id+'/'+crypto.randomUUID()+'.'+ext;let up=await sb.storage.from('company-receipts').upload(newPath,receiptFile,{contentType:receiptFile.type,upsert:false});if(up.error)throw up.error;row.storage_path=newPath}if(id){let r=await sb.from('company_receipts').update(row).eq('id',id).select('id').single();if(r.error)throw r.error}else{row.uploaded_by=user.id;let r=await sb.from('company_receipts').insert(row).select('id').single();if(r.error)throw r.error}closeM('receiptModal');resetReceiptFile();await loadReceipts();if(id&&newPath&&existing?.storage_path)await sb.storage.from('company-receipts').remove([existing.storage_path]);toast('Receipt saved to the cloud.')}catch(err){if(newPath)await sb.storage.from('company-receipts').remove([newPath]);toast('Could not save receipt: '+(err.message||err))}finally{btn.disabled=false;btn.textContent=id?'Update Receipt':'Save Receipt'}}
 async function viewReceipt(id){let r=companyReceipts.find(x=>x.id===id);if(!r)return;let result=await sb.storage.from('company-receipts').createSignedUrl(r.storage_path,120);if(result.error)return toast('Could not open receipt: '+result.error.message);window.open(result.data.signedUrl,'_blank','noopener,noreferrer')}
 async function deleteReceipt(id){let r=companyReceipts.find(x=>x.id===id);if(!r||!confirm('Permanently delete this receipt and its photo?'))return;let del=await sb.from('company_receipts').delete().eq('id',id).select('id');if(del.error||!del.data?.length)return toast('Could not delete receipt: '+(del.error?.message||'Permission denied'));let removed=await sb.storage.from('company-receipts').remove([r.storage_path]);if(removed.error)toast('Receipt record deleted, but its image cleanup failed: '+removed.error.message);await loadReceipts()}
 </script></body></html>
