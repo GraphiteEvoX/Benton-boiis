@@ -422,12 +422,14 @@ function receiptGuess(raw){
  const lines=raw.split(/\r?\n/).map(clean).filter(Boolean),text=lines.join('\n'),warnings=[];
  const $set=(field,value)=>{if(value!==null&&value!==undefined&&value!=='')$('receipt'+field).value=value};
  const moneyValue=s=>{
-   let m=String(s).replace(/,/g,'').match(/-?\$?\s*(\d{1,6}(?:\.\d{1,2})?)/);
-   if(!m)return null; let n=Number(m[1]); return Number.isFinite(n)&&n>=0&&n<100000?n:null;
+   let raw=String(s).replace(/,/g,'').trim(),neg=/^-|\(.*\)/.test(raw);
+   let m=raw.match(/\$?\s*(\d{1,6}(?:\.\d{1,2})?)/);
+   if(!m)return null; let n=Number(m[1]); if(neg)n=-n;
+   return Number.isFinite(n)&&Math.abs(n)<100000?n:null;
  };
  const amounts=line=>{
    let a=[];
-   for(let m of String(line).matchAll(/-?\$?\s*\d{1,6}(?:,\d{3})*(?:\.\d{1,2})\b/g)){let n=moneyValue(m[0]);if(n!==null)a.push(n)}
+   for(let m of String(line).matchAll(/(?:-|\()?\s*\$?\s*\d{1,6}(?:,\d{3})*(?:\.\d{1,2})\s*\)?\b/g)){let n=moneyValue(m[0]);if(n!==null)a.push(n)}
    return a;
  };
  const lastAmount=line=>{let a=amounts(line);return a.length?a[a.length-1]:null};
@@ -440,6 +442,7 @@ function receiptGuess(raw){
   [/\bchevron\b/i,'Chevron'],[/\bexxon\b/i,'Exxon'],[/\bmobil\b/i,'Mobil'],[/\bpilot\b/i,'Pilot'],[/\blove'?s\b/i,"Love’s"]
  ];
  let merchant=null;for(const [re,name] of merchantPatterns)if(re.test(text)){merchant=name;break}
+ if(!merchant&&/oreillyauto\.com/i.test(text))merchant='O’Reilly Auto Parts';
  if(merchant)$set('Vendor',merchant);else warnings.push('Vendor needs review');
 
  let dates=[...text.matchAll(/\b(0?[1-9]|1[0-2])[\/.-]([0-2]?\d|3[01])[\/.-](20\d{2}|\d{2})\b/g)];
@@ -511,13 +514,52 @@ function receiptGuess(raw){
    $set('Description',item?item.replace(/\s+\$?\d+(?:\.\d{2})?.*$/,'').trim():'Auto parts / supplies');
  }else warnings.push('Category and description need review');
 
+ // Mixed purchase + return/credit transactions (battery core returns, merchandise returns, store credits).
+ const hasReturn=/\b(?:core\s*return|return|refund|credit|core\s*charge\s*return)\b/i.test(text);
+ if(hasReturn){
+   // OCR often drops or separates a leading minus sign. Re-read labeled summary lines directly.
+   const signedLabelValue=(labelRe)=>{
+     for(const line of lines){
+       if(!labelRe.test(line))continue;
+       let tail=line.replace(labelRe,' ');
+       let m=tail.match(/(-|\()\s*\$?\s*(\d{1,6}(?:\.\d{1,2})?)/);
+       if(m){let n=Number(m[2]);return (m[1]==='-'||m[1]==='(')?-n:n}
+       let a=amounts(tail);if(a.length)return a[a.length-1];
+     }
+     return null;
+   };
+   let rs=signedLabelValue(/\bsub[\s-]*total\b/i),
+       rt=signedLabelValue(/\b(?:sales\s*tax|tax)\b/i),
+       rr=signedLabelValue(/\b(?:grand\s*total|^total\b|total\s*[:=$])/i);
+   // If a return exists and the receipt summary shows the same absolute values but OCR lost the minus,
+   // infer the negative signs only when the three values reconcile as a credit.
+   if(rs!==null&&rt!==null&&rr!==null){
+     let combos=[[rs,rt,rr],[-Math.abs(rs),-Math.abs(rt),-Math.abs(rr)],
+                 [-Math.abs(rs),-Math.abs(rt),Math.abs(rr)],[Math.abs(rs),Math.abs(rt),-Math.abs(rr)]];
+     let good=combos.find(x=>centsClose(x[0]+x[1],x[2],3));
+     if(good){$set('Subtotal',good[0].toFixed(2));$set('Tax',good[1].toFixed(2));$set('Total',good[2].toFixed(2))}
+   }
+   let credits=[];
+   lines.forEach(line=>{
+     if(/\b(?:core\s*return|return|refund|credit)\b/i.test(line)){
+       let a=amounts(line); if(a.length){let v=a[a.length-1];credits.push(v>0?-v:v)}
+     }
+   });
+   if(credits.length){
+     let c=credits.reduce((a,b)=>a+b,0);
+     let base=$('receiptDescription').value||'Parts / supplies';
+     $set('Description',base+' • Return/credit '+c.toFixed(2));
+   }else if($('receiptDescription').value){
+     $set('Description',$('receiptDescription').value+' • Includes return/credit');
+   }
+ }
  // Last-chance amount recovery for retail receipts: choose a printed trio that reconciles, even if OCR damaged a label.
  if(!$('receiptTotal').value){
    let tail=lines.slice(Math.max(0,lines.length-14)),vals=[];
-   tail.forEach((l,i)=>amounts(l).forEach(v=>{if(v<5000)vals.push({v,i,l})}));
+   tail.forEach((l,i)=>amounts(l).forEach(v=>{if(Math.abs(v)<5000)vals.push({v,i,l})}));
    outer:for(let a=0;a<vals.length;a++)for(let b=a+1;b<vals.length;b++)for(let c=b+1;c<vals.length;c++){
      let su=vals[a].v,tx=vals[b].v,to=vals[c].v;
-     if(tx<=su&&centsClose(su+tx,to,3)){$set('Subtotal',su.toFixed(2));$set('Tax',tx.toFixed(2));$set('Total',to.toFixed(2));break outer}
+     if(centsClose(su+tx,to,3)){$set('Subtotal',su.toFixed(2));$set('Tax',tx.toFixed(2));$set('Total',to.toFixed(2));break outer}
    }
  }
  if(!$('receiptTotal').value)warnings.push('Total needs review');
