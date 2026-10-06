@@ -418,48 +418,115 @@ function fillReceiptJobs(selected=''){let jobs=[...d.jobs].sort((a,b)=>(b.date||
 function newReceipt(){resetReceiptFile();$('receiptModalTitle').textContent='Add Receipt';$('receiptId').value='';$('receiptDate').value=receiptToday();for(let k of ['Vendor','Description','Quantity','Subtotal','Tax','Total'])$('receipt'+k).value='';$('receiptCategory').value='Other';fillReceiptJobs();$('receiptSaveBtn').textContent='Save Receipt';openM('receiptModal')}
 function receiptFilePicked(input){let f=input.files?.[0];if(!f)return;if(f.size>15*1024*1024)return toast('Receipt must be 15 MB or smaller.');if(!['image/jpeg','image/png','image/webp','application/pdf'].includes(f.type))return toast('Use a JPG, PNG, WebP or PDF receipt.');resetReceiptFile();receiptFile=f;$('receiptFileStatus').textContent=f.name+' • '+(f.size/1048576).toFixed(1)+' MB';if(f.type.startsWith('image/')){receiptImageUrl=URL.createObjectURL(f);$('receiptPreview').src=receiptImageUrl;$('receiptPreview').style.display='block';$('receiptReadBtn').style.display='inline-block';autoReadReceipt()}else $('receiptReadStatus').textContent='PDF saved as an attachment. Enter its details manually.'}
 function receiptGuess(raw){
- const lines=raw.split(/\r?\n/).map(x=>x.replace(/[|]/g,' ').replace(/\s+/g,' ').trim()).filter(Boolean);
- const text=lines.join('\n'), warnings=[];
+ const clean=s=>String(s||'').replace(/[|]/g,' ').replace(/[Oo](?=\d)/g,'0').replace(/(?<=\d)[Oo]/g,'0').replace(/[Il](?=\d)/g,'1').replace(/(?<=\d)[Il]/g,'1').replace(/\s+/g,' ').trim();
+ const lines=raw.split(/\r?\n/).map(clean).filter(Boolean),text=lines.join('\n'),warnings=[];
  const $set=(field,value)=>{if(value!==null&&value!==undefined&&value!=='')$('receipt'+field).value=value};
- // OCR can read a logo as nonsense. Recognize only identifiable merchant text.
- const merchantPatterns=[[/o\s*['’]?\s*reill?y(?:\s*auto\s*parts)?/i,"O’Reilly Auto Parts"],[/\bshell\b/i,'Shell'],[/\b(?:auto\s*zone|autozone)\b/i,'AutoZone'],[/\bnapa\b/i,'NAPA Auto Parts'],[/\b(?:costco|walmart|home\s*depot|lowe'?s|chevron|76|arco|exxon|mobil|pilot|love'?s)\b/i,null]];
- let merchant=null;for(const [re,name] of merchantPatterns){let match=text.match(re);if(match){merchant=name||match[0].trim();break}}
- // Unknown or mangled logos are left blank rather than saved as invented merchant names.
+ const moneyValue=s=>{
+   let m=String(s).replace(/,/g,'').match(/-?\$?\s*(\d{1,6}(?:\.\d{1,2})?)/);
+   if(!m)return null; let n=Number(m[1]); return Number.isFinite(n)&&n>=0&&n<100000?n:null;
+ };
+ const amounts=line=>{
+   let a=[];
+   for(let m of String(line).matchAll(/-?\$?\s*\d{1,6}(?:,\d{3})*(?:\.\d{1,2})\b/g)){let n=moneyValue(m[0]);if(n!==null)a.push(n)}
+   return a;
+ };
+ const lastAmount=line=>{let a=amounts(line);return a.length?a[a.length-1]:null};
+ const centsClose=(a,b,tol=2)=>Math.abs(Math.round(a*100)-Math.round(b*100))<=tol;
+
+ const merchantPatterns=[
+  [/o\s*['’]?\s*reill?y(?:\s*auto\s*parts)?/i,"O’Reilly Auto Parts"],[/\barco\b/i,'ARCO'],[/\bshell\b/i,'Shell'],
+  [/\b(?:auto\s*zone|autozone)\b/i,'AutoZone'],[/\bnapa(?:\s*auto\s*parts)?\b/i,'NAPA Auto Parts'],
+  [/\bcostco\b/i,'Costco'],[/\bwalmart\b/i,'Walmart'],[/\bhome\s*depot\b/i,'Home Depot'],[/\blowe'?s\b/i,"Lowe’s"],
+  [/\bchevron\b/i,'Chevron'],[/\bexxon\b/i,'Exxon'],[/\bmobil\b/i,'Mobil'],[/\bpilot\b/i,'Pilot'],[/\blove'?s\b/i,"Love’s"]
+ ];
+ let merchant=null;for(const [re,name] of merchantPatterns)if(re.test(text)){merchant=name;break}
  if(merchant)$set('Vendor',merchant);else warnings.push('Vendor needs review');
- // Only read an actual printed date. Keep the existing date as a manual fallback, but flag it.
+
  let dates=[...text.matchAll(/\b(0?[1-9]|1[0-2])[\/.-]([0-2]?\d|3[01])[\/.-](20\d{2}|\d{2})\b/g)];
- let date=dates.find(m=>{let year=Number(m[3]);if(year<100)year+=2000;let d=new Date(Date.UTC(year,Number(m[1])-1,Number(m[2])));return d.getUTCFullYear()===year&&d.getUTCMonth()===Number(m[1])-1&&d.getUTCDate()===Number(m[2])});
+ let date=dates.find(m=>{let y=Number(m[3]);if(y<100)y+=2000;let d=new Date(Date.UTC(y,Number(m[1])-1,Number(m[2])));return d.getUTCFullYear()===y&&d.getUTCMonth()===Number(m[1])-1&&d.getUTCDate()===Number(m[2])});
  if(date){let y=Number(date[3]);if(y<100)y+=2000;$set('Date',y+'-'+date[1].padStart(2,'0')+'-'+date[2].padStart(2,'0'))}else warnings.push('Date needs review');
- // Extract amounts from labeled lines only; do not treat TAX as TOTAL or a card charge as subtotal.
- const numberToken=/[-+]?\$?\s*\d{1,6}(?:,\d{3})*\.\d{2}\b/g;
- function amountOnLine(line){let matches=[...line.matchAll(numberToken)].map(m=>Number(m[0].replace(/[$,\s]/g,''))).filter(n=>Number.isFinite(n)&&n>=0&&n<100000);return matches.length?matches[matches.length-1]:null}
- let subtotal=[],tax=[],total=[],fuelTotals=[];
+
+ let subs=[],taxes=[],totals=[],fuelSales=[],gallons=[],prices=[];
  lines.forEach((line,i)=>{
-  let value=amountOnLine(line);if(value===null)return;
-  let prefix=line.slice(0,Math.max(0,line.lastIndexOf(String(value.toFixed(2))))).toLowerCase();
-  if(/\b(?:sub[ -]?total|subtotal)\b/i.test(line)&&!/\b(?:tax|grand)\b/i.test(line))subtotal.push({value,i});
-  else if(/\b(?:sales\s*tax|tax)\b/i.test(line)&&!/\b(?:total|taxable|tax id|tax exempt)\b/i.test(line))tax.push({value,i});
-  else if(/\b(?:fuel\s*total)\b/i.test(line))fuelTotals.push({value,i});
-  else if(/\b(?:grand\s*total|total\s*due|amount\s*paid|balance\s*due|^total\b|\btotal\s*[=:])\b/i.test(line)&&!/\b(?:sub[ -]?total|subtotal|tax|fuel total|total savings|total items|total qty)\b/i.test(line))total.push({value,i});
+   let v=lastAmount(line),low=line.toLowerCase();
+   if(v!==null){
+     if(/\bsub[\s-]*total\b/.test(low)&&!/\b(?:tax|savings)\b/.test(low))subs.push(v);
+     if(/\b(?:sales\s*tax|tax)\b/.test(low)&&!/\b(?:taxable|tax id|tax exempt|total)\b/.test(low))taxes.push(v);
+     if(/\b(?:grand\s*total|total\s*due|amount\s*due|amount\s*paid|balance\s*due|^total\b|total\s*[:=$])/.test(low)&&!/\b(?:sub[\s-]*total|tax|savings|items?|qty|quantity)\b/.test(low))totals.push(v);
+     if(/\b(?:fuel|sale|amount)\b/.test(low)&&!/\b(?:subtotal|tax|savings)\b/.test(low))fuelSales.push(v);
+   }
+   let gm=line.match(/\b(?:gallons?|gals?)\s*[:=]?\s*(\d{1,4}\.\d{2,3})\b/i)||line.match(/\b(\d{1,4}\.\d{2,3})\s*(?:g|gal|gals|gallons)\b/i);
+   if(gm){let n=Number(gm[1]);if(n>.05&&n<1000)gallons.push(n)}
+   let pm=line.match(/\b(?:price|ppu|unit\s*price|price\s*\/\s*gal)\s*[:=$]?\s*\$?\s*(\d\.\d{2,3})\b/i);
+   if(pm){let n=Number(pm[1]);if(n>.1&&n<20)prices.push(n)}
  });
- const uniq=arr=>[...new Set(arr.map(x=>x.value.toFixed(2)))].map(Number);
- let subs=uniq(subtotal),taxes=uniq(tax),totals=uniq(total),fuel=uniq(fuelTotals);
- // If a full trio is present, require cent-exact reconciliation and reject ambiguous candidates.
- let valid=[];for(let su of subs)for(let tx of taxes)for(let to of totals)if(Math.round(su*100)+Math.round(tx*100)===Math.round(to*100))valid.push({su,tx,to});
- let chosen=null;
- if(valid.length===1)chosen=valid[0];
- else if(valid.length>1){let different=new Set(valid.map(v=>[v.su,v.tx,v.to].join('|')));if(different.size===1)chosen=valid[0]}
- if(chosen){$set('Subtotal',chosen.su.toFixed(2));$set('Tax',chosen.tx.toFixed(2));$set('Total',chosen.to.toFixed(2))}
- else if(subs.length===1&&totals.length===1&&taxes.length===0&&Math.round(totals[0]*100)>=Math.round(subs[0]*100)){
-  $set('Subtotal',subs[0].toFixed(2));$set('Total',totals[0].toFixed(2));warnings.push('Tax not verified');
- }else if(totals.length===1&&subs.length===0&&taxes.length===0){$set('Total',totals[0].toFixed(2));warnings.push('Subtotal and tax not verified')}
- else if(fuel.length===1&&totals.length===0&&subs.length===0){$set('Total',fuel[0].toFixed(2));warnings.push('Fuel amount: confirm against receipt')}
- else warnings.push('Amounts could not be verified — enter them from the receipt');
- const isFuel=/\b(?:fuel|diesel|gasoline|unleaded|vpower|v-power|pump\s*#|price\s*\/\s*gal)\b/i.test(text);
- if(isFuel){$set('Category','Fuel');$set('Description','Fuel purchase');let gallonLine=lines.find(l=>/\b(?:gallons?|gals?|\d\.\d{2,3}\s*g\b|vpow|diesel)\b/i.test(l)&&/\b\d+\.\d{2,3}\s*g\b/i.test(l));let gal=gallonLine?.match(/\b(\d{1,4}\.\d{2,3})\s*g\b/i)||text.match(/\b(\d{1,4}\.\d{2,3})\s*(?:gal|gallons)\b/i);if(gal)$set('Quantity',gal[1]);else warnings.push('Gallons need review')}
- else if(/\b(?:o\s*['’]?reill?y|auto\s*parts|bulb socket|light socket|fuse|motor\s*oil)\b/i.test(text)){$set('Category','Parts');$set('Description','Auto parts / supplies')}
- else warnings.push('Category and description need review');
- return warnings;
+ const uniq=a=>[...new Set(a.map(n=>Number(n).toFixed(3)))].map(Number);
+ subs=uniq(subs);taxes=uniq(taxes);totals=uniq(totals);fuelSales=uniq(fuelSales);gallons=uniq(gallons);prices=uniq(prices);
+
+ let trio=null;
+ for(let su of subs)for(let tx of taxes)for(let to of totals)if(centsClose(su+tx,to))trio={su,tx,to};
+ if(trio){$set('Subtotal',trio.su.toFixed(2));$set('Tax',trio.tx.toFixed(2));$set('Total',trio.to.toFixed(2))}
+ else{
+   if(subs.length===1)$set('Subtotal',subs[0].toFixed(2));
+   if(taxes.length===1)$set('Tax',taxes[0].toFixed(2));
+   if(totals.length===1)$set('Total',totals[0].toFixed(2));
+   if(subs.length===1&&taxes.length===1&&totals.length===0)$set('Total',(subs[0]+taxes[0]).toFixed(2));
+ }
+
+ const isFuel=/\b(?:fuel|diesel|gasoline|unleaded|gallons?|pump\s*#|price\s*\/\s*gal|ppu)\b/i.test(text);
+ if(isFuel){
+   $set('Category','Fuel');$set('Description','Fuel purchase');
+   let g=gallons[0]||null,p=prices[0]||null,t=totals.length===1?totals[0]:null;
+   if(!g&&p&&t)g=t/p;
+   if(!t&&g&&p)t=g*p;
+   // Common pump layout: GALLONS, PRICE/G, FUEL SALE on adjacent lines.
+   if(!g){
+     for(let i=0;i<lines.length;i++)if(/\bgallons?\b/i.test(lines[i])){
+       for(let j=i;j<Math.min(lines.length,i+4);j++){let m=lines[j].match(/\b(\d{1,4}\.\d{2,3})\b/);if(m&&Number(m[1])>1){g=Number(m[1]);break}}
+       if(g)break;
+     }
+   }
+   if(!p){
+     for(let i=0;i<lines.length;i++)if(/\b(?:price|ppu)\b/i.test(lines[i])){
+       for(let j=i;j<Math.min(lines.length,i+3);j++){let m=lines[j].match(/\b(\d\.\d{2,3})\b/);if(m){p=Number(m[1]);break}}
+       if(p)break;
+     }
+   }
+   if(!t&&g&&p)t=g*p;
+   if(!t&&fuelSales.length){
+     let plausible=fuelSales.filter(x=>!p||x>p*2);if(plausible.length)t=plausible[plausible.length-1];
+   }
+   if(g)$set('Quantity',g.toFixed(3).replace(/0+$/,'').replace(/\.$/,''));
+   else warnings.push('Gallons need review');
+   if(t){
+     $set('Total',t.toFixed(2));
+     // Fuel receipts usually have no sales tax line; treat sale amount as subtotal only when tax is absent.
+     if(!$('receiptSubtotal').value&&!$('receiptTax').value)$set('Subtotal',t.toFixed(2));
+   }
+ }else if(/\b(?:o\s*['’]?\s*reill?y|auto\s*parts|napa|autozone|core\s*return|warranty|motor\s*oil|filter|belt|hose|sensor|bulb|fuse|bearing|brake|battery)\b/i.test(text)){
+   $set('Category','Parts');
+   let ignore=/\b(?:thank|subtotal|sales tax|total|savings|counter|date|invoice|store hours|phone|address|warranty|core return|qty|quantity|auth|visa|mastercard|change)\b/i;
+   let candidates=lines.filter(l=>!ignore.test(l)&&/[A-Za-z]{3}/.test(l)&&l.length>=4&&l.length<=60);
+   let item=candidates.find(l=>/\b(?:filter|belt|hose|sensor|bulb|fuse|bearing|brake|battery|pin|rust|penetr|oil|part)\b/i.test(l));
+   $set('Description',item?item.replace(/\s+\$?\d+(?:\.\d{2})?.*$/,'').trim():'Auto parts / supplies');
+ }else warnings.push('Category and description need review');
+
+ // Last-chance amount recovery for retail receipts: choose a printed trio that reconciles, even if OCR damaged a label.
+ if(!$('receiptTotal').value){
+   let tail=lines.slice(Math.max(0,lines.length-14)),vals=[];
+   tail.forEach((l,i)=>amounts(l).forEach(v=>{if(v<5000)vals.push({v,i,l})}));
+   outer:for(let a=0;a<vals.length;a++)for(let b=a+1;b<vals.length;b++)for(let c=b+1;c<vals.length;c++){
+     let su=vals[a].v,tx=vals[b].v,to=vals[c].v;
+     if(tx<=su&&centsClose(su+tx,to,3)){$set('Subtotal',su.toFixed(2));$set('Tax',tx.toFixed(2));$set('Total',to.toFixed(2));break outer}
+   }
+ }
+ if(!$('receiptTotal').value)warnings.push('Total needs review');
+ else{
+   let su=Number($('receiptSubtotal').value),tx=Number($('receiptTax').value),to=Number($('receiptTotal').value);
+   if($('receiptSubtotal').value&&$('receiptTax').value&&!centsClose(su+tx,to,3))warnings.push('Amounts need review');
+   else if(!$('receiptSubtotal').value||(!$('receiptTax').value&&!isFuel))warnings.push('Subtotal or tax needs review');
+ }
+ return [...new Set(warnings)];
 }
 async function receiptOcrImage(file){
  // Analyze a downscaled photograph to locate the bright paper, excluding the table/bed.
@@ -507,8 +574,9 @@ async function autoReadReceipt(){
   let images=await receiptOcrImage(receiptFile);
   let worker=await Tesseract.createWorker('eng');let results=[];
   try{
-   if(images.cropped){$('receiptReadStatus').textContent='Reading enlarged receipt…';let r=await worker.recognize(images.cropped);results.push(r.data.text||'')}
-   $('receiptReadStatus').textContent='Checking printed dates and amounts…';let r=await worker.recognize(images.full);results.push(r.data.text||'');
+   if(images.cropped){$('receiptReadStatus').textContent='Reading enlarged receipt…';let r=await worker.recognize(images.cropped);results.push(r.data.text||'');
+    await worker.setParameters({tessedit_pageseg_mode:'6',preserve_interword_spaces:'1'});let r2=await worker.recognize(images.cropped);results.push(r2.data.text||'')}
+   $('receiptReadStatus').textContent='Checking printed dates and amounts…';await worker.setParameters({tessedit_pageseg_mode:'3',preserve_interword_spaces:'1'});let r=await worker.recognize(images.full);results.push(r.data.text||'');
   }finally{await worker.terminate()}
   // Merge independent reads; the parser accepts amounts only when labeled and reconciled.
   let warnings=receiptGuess(results.join('\n'));
